@@ -4,10 +4,44 @@ var sass        = require('gulp-sass');
 var prefix      = require('gulp-autoprefixer');
 var cp          = require('child_process');
 var jade          = require('gulp-jade');
+var concat = require('gulp-concat');
+var uglify = require('gulp-uglify');
+var gulpif = require('gulp-if');
+var rename = require('gulp-rename');
+var sourcemaps = require('gulp-sourcemaps');
+var plumber = require('gulp-plumber');
+var notify = require('gulp-notify');
+var  imagemin = require('gulp-imagemin');
+var pngcrush = require('imagemin-pngcrush');
+
+var env,
+    sassStyle;
+
+env = process.env.NODE_ENV || 'development';
+
+if (env==='development')
+  {
+  sassStyle = 'expanded';
+} else {
+  sassStyle = 'compressed';
+}
 
 var messages = {
     jekyllBuild: '<span style="color: grey">Running:</span> $ jekyll build'
 };
+
+
+function customPlumber(errTitle) {
+  return plumber({
+    errorHandler: notify.onError({
+      // Customizing error title
+      title: errTitle || "Error running Gulp",
+      message: "Error: <%= error.message %>",
+    })
+  });
+}
+
+
 
 /**
  * Build the Jekyll Site
@@ -37,16 +71,28 @@ gulp.task('browser-sync', ['sass', 'jekyll-build'], function() {
     });
 });
 
+gulp.task('js', function() {
+  return gulp.src(['assets/js/functions.js'])
+  	.pipe(customPlumber('Error Running JS'))
+  	.pipe(gulpif(env === 'production', uglify()))
+    .pipe(gulp.dest('_site/assets/js'))
+  	.pipe(browserSync.reload({stream:true}));
+});
+
 /**
  * Compile files from _scss into both _site/css (for live injecting) and site (for future jekyll builds)
  */
 gulp.task('sass', function () {
     return gulp.src('assets/css/main.scss')
+		.pipe(customPlumber('Error Running Sass'))
+		.pipe(sourcemaps.init())
         .pipe(sass({
+			outputStyle: sassStyle,
             includePaths: ['css'],
             onError: browserSync.notify
         }))
         .pipe(prefix(['last 15 versions', '> 1%', 'ie 8', 'ie 7'], { cascade: true }))
+		.pipe(sourcemaps.write())
         .pipe(gulp.dest('_site/assets/css'))
         .pipe(browserSync.reload({stream:true}))
         .pipe(gulp.dest('assets/css'));
@@ -58,16 +104,25 @@ gulp.task('sass', function () {
 
 gulp.task('jade', function  () {
   return gulp.src('_jadefiles/*.jade')
+  .pipe(customPlumber('Error Running JADE'))
   .pipe(jade())
   .pipe(gulp.dest('_includes'));
 });
 
-gulp.task('js', function() {
-  return gulp.src('assets/js/functions.js')
-    .pipe(gulp.dest('_site/assets/js'))
-  	.pipe(browserSync.reload({stream:true}))
-    .pipe(gulp.dest('assets/js'));
+
+
+
+gulp.task('images', function() {
+  gulp.src('assets/img/**/*.*')
+    .pipe(gulpif(env === 'production', imagemin({
+      progressive: true,
+      svgoPlugins: [{ removeViewBox: false }]
+    })))
+    .pipe(gulpif(env === 'production', gulp.dest('_site/assets/img1')))
+    .pipe(browserSync.reload({stream:true}));
 });
+
+
 
 
 /**
@@ -75,14 +130,15 @@ gulp.task('js', function() {
  * Watch html/md files, run jekyll & reload BrowserSync
  */
 gulp.task('watch', function () {
+	gulp.watch('assets/js/*.js', ['js']);
     gulp.watch('assets/css/**', ['sass']);
     gulp.watch(['index.html', '_layouts/*.html', '_includes/*'], ['jekyll-rebuild']);
     gulp.watch(['_jadefiles/*.jade'], ['jade']);
-	gulp.watch('assets/js/**', ['js']);
+    gulp.watch(['assets/img/**/*.*'], ['images']);
 });
 
 /**
  * Default task, running just `gulp` will compile the sass,
  * compile the jekyll site, launch BrowserSync & watch files.
  */
-gulp.task('default', ['browser-sync', 'watch']);
+gulp.task('default', ['js','sass','jekyll-rebuild','jade','images','browser-sync', 'watch']);
